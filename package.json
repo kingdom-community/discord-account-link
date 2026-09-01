@@ -1,0 +1,55 @@
+{
+  "name": "@kingdom-community/discord-account-link",
+  "version": "0.1.0",
+  "description": "Link a Discord identity to an account on your own community site: OAuth2 authorization-code flow, identify scope only, and no Discord token ever stored.",
+  "license": "MIT",
+  "author": "Daniel McCoy Stephenson",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kingdom-community/discord-account-link.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kingdom-community/discord-account-link/issues"
+  },
+  "homepage": "https://github.com/kingdom-community/discord-account-link#readme",
+  "keywords": [
+    "discord",
+    "oauth2",
+    "account-linking",
+    "authorization-code",
+    "identity",
+    "community",
+    "typescript"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "typescript": "^5.5.4",
+    "vitest": "^2.1.9"
+  }
+}
