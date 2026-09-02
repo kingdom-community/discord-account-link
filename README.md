@@ -197,8 +197,10 @@ an error page and a redirect.
 point: it makes "not configured" a value the rest of the package carries around
 and checks, rather than an exception thrown from deep inside a redirect handler.
 
-`@kingdom-community/web-guards` ships an equivalent signer, so the two packages
-can be wired together by passing that signer here. Neither depends on the other.
+`@kingdom-community/web-guards` implements the same signed-state scheme, but
+exposes it as `issueState`/`verifyState` functions that take the signing secret
+directly rather than as a `StateSigner` object, so there is nothing there to
+pass in here as one. Neither package depends on the other.
 
 ## Testing your integration
 
