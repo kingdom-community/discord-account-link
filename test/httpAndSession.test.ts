@@ -166,6 +166,10 @@ describe('mapping a store HTTP response to an outcome', () => {
         // visitor is told they can fix.
         expect(linkOutcomeFrom({status: 409, body: null}, {read: () => null, refusalStatuses: [422]}))
             .toEqual({state: 'unavailable', detail: 'the account service answered HTTP 409'});
+        // The overrides REPLACE the defaults rather than extending them, so a
+        // store that names 204 no longer gets 200 for free.
+        expect(linkOutcomeFrom({status: 200, body: null}, {read: () => null, okStatuses: [204]}))
+            .toEqual({state: 'unavailable', detail: 'the account service answered HTTP 200'});
     });
 
     it('supplies a sentence when the refusal body carried none', () => {
