@@ -44,6 +44,49 @@ describe('the callback response table', () => {
         expect(response.body.error).toBe('identity_already_linked');
     });
 
+    it('carries the identity and nothing else on success', () => {
+        // Asserted over the WHOLE body: this is where a caller's response is
+        // assembled, so a field nobody intended must not be able to appear here
+        // unnoticed.
+        const response = callbackResponse({state: 'ok', identity: {id: '9876', username: 'alice'}});
+
+        expect(response.status).toBe(200);
+        expect(response.body).toEqual({linked: true, discord: {id: '9876', username: 'alice'}});
+    });
+
+    it('is 401 when the session went away mid-flow', () => {
+        const response = callbackResponse({state: 'unauthenticated'});
+
+        expect(response.status).toBe(401);
+        expect(response.body).toEqual({error: 'unauthenticated', message: 'You are not signed in.'});
+    });
+
+    it('falls back to 400 when Discord refused and there is no machine code', () => {
+        // `flow.link` produces exactly this shape when DISCORD refused rather
+        // than the store: Discord's error bodies are not forwarded, so there is
+        // no status or code of its own to pass on.
+        const response = callbackResponse({
+            state: 'refused',
+            detail: 'Discord did not accept that authorisation',
+            code: null,
+            status: null
+        });
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+            error: 'refused',
+            message: 'Discord did not accept that authorisation'
+        });
+    });
+
+    it('answers 503 for an outage without repeating the operator detail', () => {
+        const response = callbackResponse({state: 'unavailable', detail: 'https://discord.internal timed out'});
+
+        expect(response.status).toBe(503);
+        expect(response.body.error).toBe('discord_unavailable');
+        expect(JSON.stringify(response.body)).not.toContain('discord.internal');
+    });
+
     it('is never cacheable', () => {
         expect(callbackResponse({state: 'ok', identity: {id: '1', username: 'a'}}).headers)
             .toEqual({'Cache-Control': 'no-store'});
@@ -61,6 +104,23 @@ describe('the unlink response table', () => {
 
     it('is 401 when nobody is signed in', () => {
         expect(unlinkResponse({state: 'unauthenticated'}).status).toBe(401);
+    });
+
+    it('forwards a refusal with the sentence whatever refused wrote', () => {
+        // The message is forwarded rather than rewritten so the machine code and
+        // the sentence cannot drift apart.
+        const response = unlinkResponse({
+            state: 'refused',
+            status: 403,
+            code: 'link_locked',
+            message: 'That link was locked by a moderator.'
+        });
+
+        expect(response.status).toBe(403);
+        expect(response.body).toEqual({
+            error: 'link_locked',
+            message: 'That link was locked by a moderator.'
+        });
     });
 
     it('never leaks an upstream detail into the body', () => {
@@ -89,6 +149,23 @@ describe('mapping a store HTTP response to an outcome', () => {
             .toEqual({state: 'unavailable', detail: 'the accounts API answered HTTP 502'});
         expect(linkOutcomeFrom({status: 401, body: null}, {read: () => null}))
             .toEqual({state: 'unauthenticated'});
+    });
+
+    it('honours a store that answers on statuses of its own', () => {
+        // A delete that answers 204, and a validation failure the store wants
+        // treated as actionable rather than as an outage.
+        expect(linkOutcomeFrom({status: 204, body: null}, {
+            read: () => ({unlinked: true}),
+            okStatuses: [204]
+        })).toEqual({state: 'ok', value: {unlinked: true}});
+        expect(linkOutcomeFrom({status: 422, body: {error: 'not_a_handle', message: 'That is not a handle.'}}, {
+            read: () => null,
+            refusalStatuses: [422]
+        })).toEqual({state: 'refused', status: 422, code: 'not_a_handle', message: 'That is not a handle.'});
+        // A status the mapping did not name stays an outage, not something a
+        // visitor is told they can fix.
+        expect(linkOutcomeFrom({status: 409, body: null}, {read: () => null, refusalStatuses: [422]}))
+            .toEqual({state: 'unavailable', detail: 'the account service answered HTTP 409'});
     });
 
     it('supplies a sentence when the refusal body carried none', () => {
