@@ -5,7 +5,8 @@ import {
     discordLinkConfigFromEnv,
     discordLinkFlowFromEnv,
     discordLinkingConfigured,
-    type EnvSource
+    type EnvSource,
+    type FromEnvOptions
 } from '../src/index.js';
 
 // The gate. Deployments with no Discord application are ordinary, and the
@@ -102,5 +103,22 @@ describe('building a flow from the environment', () => {
         });
 
         expect(flow.configured()).toBe(true);
+    });
+
+    it('names its options type on the public surface, so a wrapper can be typed', () => {
+        // The type is imported from the barrel above rather than from a module
+        // path, because the package publishes exactly one entry point and a
+        // consumer has no other way to reach it.
+        const options: FromEnvOptions = {env: FULL};
+        const wrapped = (given: FromEnvOptions) => discordLinkFlowFromEnv(given);
+
+        expect(wrapped(options).configured()).toBe(true);
+    });
+
+    it('stays off when a null signer is passed, even against a complete environment', () => {
+        // An omitted signer means "read the secret"; an explicit null means "there
+        // is no signer", and an unsigned state is the one thing this flow must
+        // never accept — so the environment does not get to override it.
+        expect(discordLinkFlowFromEnv({env: FULL, signer: null}).configured()).toBe(false);
     });
 });

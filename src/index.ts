@@ -71,4 +71,7 @@ export {
     type RouteResponse
 } from './http.js';
 
-export {discordLinkFlowFromEnv} from './fromEnv.js';
+export {
+    discordLinkFlowFromEnv,
+    type FromEnvOptions
+} from './fromEnv.js';
