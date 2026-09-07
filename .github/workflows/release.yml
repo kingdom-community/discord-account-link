@@ -17,7 +17,10 @@ jobs:
         with:
           node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
-      - run: npm install
+      # `npm ci` rather than `npm install`: what is published must have been
+      # built from the dependency tree the lockfile records, not from whatever
+      # `npm install` was willing to resolve on the day.
+      - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
