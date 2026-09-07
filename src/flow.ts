@@ -18,7 +18,7 @@ import {
 } from './discordOAuth.js';
 import type {DiscordLinkConfig} from './config.js';
 import type {AccountLinkStore, LinkOutcome} from './linkStore.js';
-import {issueState, verifyState, type StateVerdict} from './oauthState.js';
+import {issueState, unbindable, verifyState, type StateVerdict} from './oauthState.js';
 import type {StateSigner} from './stateSigner.js';
 
 export interface DiscordLinkFlowOptions {
@@ -39,7 +39,11 @@ export type BeginOutcome =
     | {state: 'ok'; url: string; oauthState: string}
     // Every caller must handle this, and the right handling is to hide the
     // affordance rather than to show an error.
-    | {state: 'not-configured'};
+    | {state: 'not-configured'}
+    // Nobody is signed in, so there is no account to bind a state to. Named the
+    // same as the `LinkFlowOutcome` member because it is the same fact, and the
+    // right handling is a 401 rather than the 503 `not-configured` earns.
+    | {state: 'unauthenticated'};
 
 export type CompleteOutcome =
     | {state: 'ok'; identity: DiscordIdentity}
@@ -66,7 +70,10 @@ export type LinkFlowOutcome =
 
 export interface CallbackParameters {
     // The account the session says is finishing the flow. The state is checked
-    // against THIS.
+    // against THIS, so it must be a real account identifier: an empty or
+    // whitespace-only value — what `session?.username ?? ''` yields for a
+    // visitor who is not signed in — is refused as `invalid-state`/`unbound`
+    // rather than matching another empty one.
     accountUsername: string;
     code?: string | string[] | null;
     state?: string | string[] | null;
@@ -147,11 +154,18 @@ export const createDiscordLinkFlow = (options: DiscordLinkFlowOptions): DiscordL
             if (!config || !signer) {
                 return {state: 'not-configured'};
             }
+            // Checked here rather than left to the null below, so that the
+            // caller can tell "this deployment cannot link" from "you are not
+            // signed in". A state bound to an empty account binds to nothing:
+            // every other signed-out browser shares that value.
+            if (unbindable(accountUsername)) {
+                return {state: 'unauthenticated'};
+            }
             const state = issueState(accountUsername, signer, now());
             if (!state) {
-                // Unreachable while `signer` is non-null, and kept anyway: the
-                // alternative to this branch is an authorize URL with an
-                // unsigned state in it.
+                // Unreachable while `signer` is non-null and the username is
+                // bindable, and kept anyway: the alternative to this branch is
+                // an authorize URL with an unsigned state in it.
                 return {state: 'not-configured'};
             }
             return {state: 'ok', url: authorizeUrl(config, state), oauthState: state};

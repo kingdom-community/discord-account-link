@@ -35,7 +35,31 @@ export const STATE_TTL_MS = 10 * 60 * 1000;
 
 export type StateVerdict =
     | {ok: true; username: string}
-    | {ok: false; reason: 'not-configured' | 'malformed' | 'bad-signature' | 'expired' | 'wrong-session'};
+    | {
+          ok: false;
+          reason:
+              | 'not-configured'
+              | 'malformed'
+              | 'bad-signature'
+              | 'expired'
+              | 'wrong-session'
+              // Nothing was on one side of the binding to bind: an empty or
+              // whitespace-only account identifier, in the state or in the
+              // session. Distinct from `wrong-session`, which is two real
+              // accounts that do not match, because it points at the calling
+              // route rather than at an attacker.
+              | 'unbound';
+      };
+
+// An account identifier that cannot be bound to. The empty string is the value
+// a defensive route produces for itself — `session?.username ?? ''` — and
+// whitespace is the same absence with a space in it, so both are refused. The
+// same reasoning, and the same `trim`, is why `createHmacStateSigner` treats a
+// blank secret as no secret.
+// Not re-exported from `index.ts`: internal to the package, shared with
+// `flow.ts` so both ends apply one rule.
+export const unbindable = (username: unknown): boolean =>
+    typeof username !== 'string' || username.trim() === '';
 
 interface StatePayload {
     n?: unknown;
@@ -45,13 +69,31 @@ interface StatePayload {
 
 // A `state` for a flow started by `username`. Null when there is no signer,
 // which is the caller's cue to answer 503 rather than to start a flow it cannot
-// finish.
+// finish — and null, for the same reason, when `username` is empty or
+// whitespace-only.
+//
+// AN EMPTY USERNAME IS A BINDING TO NOTHING. The whole point of the payload
+// below is that the callback can check the browser finishing the flow is the one
+// that started it; a state issued for `''` verifies against every other `''`, so
+// two unauthenticated browsers each finish the other's flow without forging
+// anything. Such a state must therefore never exist, which is why it is refused
+// here as well as at `verifyState` — a fail-closed primitive is checked at both
+// ends, and the end that never mints the value is the one that keeps it out of
+// browser histories and proxy logs in the first place.
+//
+// Both nulls mean the identical thing to the only correct caller: do not start a
+// flow. Callers that must tell them apart — to answer 503 for one and 401 for
+// the other — test the username themselves first, which is exactly what
+// `flow.begin` does.
 export const issueState = (
     username: string,
     signer: StateSigner | null | undefined,
     now: number = Date.now()
 ): string | null => {
     if (!signer) {
+        return null;
+    }
+    if (unbindable(username)) {
         return null;
     }
     // The nonce makes two states issued in the same millisecond for the same
@@ -105,6 +147,15 @@ export const verifyState = (
     }
     if (payload.e <= now) {
         return {ok: false, reason: 'expired'};
+    }
+    // NOTHING TO BIND TO. Checked before the comparison below, because an
+    // inequality between two empty strings SUCCEEDS, and a success here is the
+    // binding silently not happening. `issueState` no longer mints such a state,
+    // but this verify is a published entry point that also accepts states from
+    // an injected signer and from any older issuer, so it refuses the value
+    // rather than trusting that nobody produced one.
+    if (unbindable(payload.u) || unbindable(sessionUsername)) {
+        return {ok: false, reason: 'unbound'};
     }
     // THE BINDING. Without this line the state is merely unforgeable, and an
     // attacker who obtains one — by starting a flow themselves — can finish it

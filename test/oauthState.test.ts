@@ -33,6 +33,19 @@ describe('issuing a state', () => {
         expect(issueState('alice', null)).toBeNull();
         expect(issueState('alice', undefined)).toBeNull();
     });
+
+    it('REFUSES an empty or whitespace-only account, which binds to nothing', () => {
+        // `session?.username ?? ''` is ordinary defensive code in a calling
+        // route, and it is how an unbound state gets minted: every signed-out
+        // browser shares the empty value, so each holds a state that verifies
+        // against the others. The value must never come into existence.
+        expect(issueState('', signer)).toBeNull();
+        expect(issueState('   ', signer)).toBeNull();
+        expect(issueState('\t\n', signer)).toBeNull();
+        // Not an over-broad rule: a real account still gets one.
+        expect(issueState('alice', signer)).toBeTruthy();
+        expect(issueState(' alice ', signer)).toBeTruthy();
+    });
 });
 
 describe('building the default signer', () => {
@@ -142,6 +155,45 @@ describe('verifying a state', () => {
 
         expect(verifyState([state, 'junk'], 'alice', signer)).toEqual({ok: true, username: 'alice'});
         expect(verifyState(['junk', state], 'alice', signer)).toEqual({ok: false, reason: 'malformed'});
+    });
+
+    it('REFUSES a state bound to an empty account, against an empty session', () => {
+        // The attack this whole module exists to stop, reached without forging
+        // anything. The state is hand-signed rather than issued, because
+        // `issueState` no longer mints one — and `verifyState` is a published
+        // entry point that also takes states from an injected signer, so it
+        // refuses the value rather than trusting that nobody produced it.
+        const unbound = signer.sign(JSON.stringify({n: 'nonce', u: '', e: Date.now() + STATE_TTL_MS}));
+
+        // Emphatically NOT {ok: true, username: ''}.
+        expect(verifyState(unbound, '', signer)).toEqual({ok: false, reason: 'unbound'});
+        expect(verifyState(unbound, 'alice', signer)).toEqual({ok: false, reason: 'unbound'});
+    });
+
+    it('REFUSES an empty or whitespace-only session, whatever the state says', () => {
+        // The other end of the same hole: a real state, and a callback route
+        // that resolved nobody. There is nothing to bind to, so nothing is
+        // accepted.
+        const state = issueState('alice', signer) as string;
+
+        expect(verifyState(state, '', signer)).toEqual({ok: false, reason: 'unbound'});
+        expect(verifyState(state, '   ', signer)).toEqual({ok: false, reason: 'unbound'});
+    });
+
+    it('calls a whitespace-only binding unbound rather than merely mismatched', () => {
+        // Two blank values are not two accounts that disagree, and an operator
+        // reading `wrong-session` in a log would go looking for an attacker
+        // instead of for the route that passed nothing.
+        const blank = signer.sign(JSON.stringify({n: 'nonce', u: '  ', e: Date.now() + STATE_TTL_MS}));
+
+        expect(verifyState(blank, '  ', signer)).toEqual({ok: false, reason: 'unbound'});
+    });
+
+    it('still reports two real accounts that disagree as the wrong session', () => {
+        // The refusal above must not have swallowed the ordinary mismatch.
+        const state = issueState('alice', signer) as string;
+
+        expect(verifyState(state, 'mallory', signer)).toEqual({ok: false, reason: 'wrong-session'});
     });
 
     it('accepts an injected signer that is not the HMAC one', () => {
