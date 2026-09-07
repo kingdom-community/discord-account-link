@@ -99,6 +99,18 @@ describe('beginning the flow', () => {
         expect((begun as {url: string}).url).not.toContain(CONFIG.clientSecret);
     });
 
+    it('REFUSES to start a flow for nobody, and says so as 401 rather than 503', () => {
+        // A state bound to `''` binds to nothing: every signed-out browser
+        // shares it. `begin` reports the empty account distinctly from the
+        // switched-off deployment, because the two earn different statuses.
+        const {flow} = flowWith([]);
+
+        expect(flow.begin('')).toEqual({state: 'unauthenticated'});
+        expect(flow.begin('   ')).toEqual({state: 'unauthenticated'});
+        // No URL was produced, so no unbound state reached a browser history.
+        expect(flow.begin('')).not.toHaveProperty('url');
+    });
+
     it('asks for exactly one scope and never a second', () => {
         const {flow} = flowWith([]);
         const url = new URL((flow.begin('alice') as {url: string}).url);
@@ -292,6 +304,61 @@ describe('completing the flow', () => {
         const outcome = await flow.complete({accountUsername: 'alice', code: 'c', state: validState()});
 
         expect(outcome).toEqual({state: 'ok', identity: {id: '1', username: 'x'.repeat(64)}});
+    });
+});
+
+describe('a callback for nobody', () => {
+    // The binding failure the state exists to prevent, reached through the flow
+    // rather than through the primitive.
+    const unboundState = () =>
+        signer.sign(JSON.stringify({n: 'nonce', u: '', e: Date.now() + 600_000}));
+
+    it('REFUSES an empty session holding a state issued for an empty account', async () => {
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        const outcome = await flow.complete({
+            accountUsername: '',
+            code: 'the-code',
+            state: unboundState()
+        });
+
+        expect(outcome).toEqual({state: 'invalid-state', reason: 'unbound'});
+        // Nothing was said to Discord: the state is checked before any
+        // authorization code is exchanged, and an unbound one is no exception.
+        expect(calls).toHaveLength(0);
+    });
+
+    it('REFUSES a real state arriving at a callback that resolved nobody', async () => {
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        const outcome = await flow.complete({
+            accountUsername: '   ',
+            code: 'the-code',
+            state: issueState('alice', signer) as string
+        });
+
+        expect(outcome).toEqual({state: 'invalid-state', reason: 'unbound'});
+        expect(calls).toHaveLength(0);
+    });
+
+    it('writes nothing to the store for an unbound callback', async () => {
+        // The outcome that matters: a Discord identity landing on an empty
+        // account row, which is the row every signed-out visitor would share.
+        const saves: unknown[] = [];
+        const store: AccountLinkStore = {
+            saveDiscordLink: async (input) => {
+                saves.push(input);
+                return {state: 'ok', value: null};
+            },
+            removeDiscordLink: async () => ({state: 'ok', value: {unlinked: true}})
+        };
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE, store);
+
+        const outcome = await flow.link({accountUsername: '', code: 'the-code', state: unboundState()});
+
+        expect(outcome).toEqual({state: 'invalid-state', reason: 'unbound'});
+        expect(saves).toEqual([]);
+        expect(calls).toHaveLength(0);
     });
 });
 

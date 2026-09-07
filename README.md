@@ -37,6 +37,12 @@ the test suite rather than by convention.
   random. A random state stops a replayed callback; it does not stop an attacker
   completing Discord's consent screen with *their* account against *your*
   session. The binding does.
+- **An empty account identifier is refused at both ends of that binding.**
+  `session?.username ?? ''` is ordinary defensive code, and a state bound to `''`
+  binds to nothing — every signed-out browser shares that value, so each could
+  finish another's flow. `issueState` will not mint one and `verifyState` will
+  not accept one (`reason: 'unbound'`); `flow.begin` answers
+  `{state:'unauthenticated'}` so a route can tell that apart from a 503.
 - **The signer is injected.** Signing is a two-method port; an HMAC-SHA256
   implementation ships in the box, and a site that already issues signed values
   to browsers can pass its own and keep one secret instead of two.
@@ -129,6 +135,9 @@ const flow = discordLinkFlowFromEnv({store});
 
 ```ts
 const begun = flow.begin(session.username);
+if (begun.state === 'unauthenticated') {
+    return response.status(401).json({error: 'unauthenticated'});
+}
 if (begun.state !== 'ok') {
     return response.status(503).json({error: 'discord_linking_unavailable'});
 }
@@ -217,7 +226,7 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 | `discordLinkFlowFromEnv(options?)` | The ordinary entry point. Reads the environment, returns a flow that is already switched off if it should be. |
 | `createDiscordLinkFlow(options)` | Explicit construction: `config`, `signer`, optional `store`, `fetchImpl`, `timeoutMs`, `now`. |
 | `flow.configured()` / `discordLinkingConfigured(env?)` | The gate. |
-| `flow.begin(username)` | `{state:'ok', url, oauthState}` or `{state:'not-configured'}`. |
+| `flow.begin(username)` | `{state:'ok', url, oauthState}`, `{state:'not-configured'}`, or `{state:'unauthenticated'}` for an empty username. |
 | `flow.complete(params)` | Verified identity, without touching the store. |
 | `flow.link(params)` | `complete` plus a write to the store. |
 | `flow.unlink(username)` | Idempotent removal. Outside the gate. |
