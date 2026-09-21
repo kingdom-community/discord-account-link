@@ -127,7 +127,7 @@ describe('exchanging the code', () => {
     it('refuses a grant that answered without a usable access token', async () => {
         // Discord answering 200 with a shape nobody planned for is not a reason
         // to carry on with `undefined` in an Authorization header.
-        for (const body of [{}, {access_token: 12345}, null]) {
+        for (const body of [{}, {access_token: 12345}, {access_token: ''}, null, 'not an object']) {
             const {calls, outcome} = await exchangeWith([tokenGrant(body)]);
 
             expect(outcome).toEqual({state: 'refused', detail: 'Discord did not accept that authorisation'});
@@ -136,21 +136,20 @@ describe('exchanging the code', () => {
         }
     });
 
-    it('spends an EMPTY access token on the identity read, and lets Discord refuse it', async () => {
-        // Characterisation, not endorsement. `access_token: ''` is a string, so
-        // it passes the type check the grant applies and produces a request with
-        // a bare `Bearer ` header; the identity read then refuses it. The
-        // identity half rejects `id: ''` explicitly and this half does not,
-        // which is the asymmetry recorded here rather than changed under a
-        // test-expansion change.
+    it('refuses an EMPTY access token at the grant, rather than spending it on the identity read', async () => {
+        // `''` is a string, so a type check alone would let it through and put a
+        // bare `Bearer ` header on the wire for Discord to refuse. The identity
+        // half rejects `id: ''` for the same reason, and the two now agree: an
+        // empty value is no value. The second response is queued so that, were
+        // the read to happen, it would be recorded rather than throw.
         const {calls, outcome} = await exchangeWith([
             tokenGrant({access_token: ''}),
             {status: 401, body: {}}
         ]);
 
-        expect(calls).toHaveLength(2);
-        expect(calls[1]?.headers.Authorization).toBe('Bearer ');
-        expect(outcome).toEqual({state: 'refused', detail: 'Discord did not return an account'});
+        expect(calls).toHaveLength(1);
+        expect(calls[0]?.url).toBe(DISCORD_TOKEN_URL);
+        expect(outcome).toEqual({state: 'refused', detail: 'Discord did not accept that authorisation'});
     });
 
     it('does not forward Discord’s error body, which echoes the request', async () => {

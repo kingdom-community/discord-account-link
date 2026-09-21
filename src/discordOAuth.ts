@@ -131,13 +131,17 @@ export const exchangeCodeForIdentity = async (
             return {state: 'unavailable', detail: `Discord answered HTTP ${response.status}`};
         }
         const body = await response.json().catch(() => null);
-        if (!response.ok || !body || typeof (body as Record<string, unknown>).access_token !== 'string') {
+        const grant = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
+        // An empty token is no token, the same way an empty `id` below is no
+        // account: it would go out as a bare `Bearer ` header and buy nothing
+        // but a second round trip to hear Discord say so.
+        if (!response.ok || !grant || typeof grant.access_token !== 'string' || grant.access_token === '') {
             // Deliberately does NOT forward Discord's error body. It echoes the
             // request, which carries the client id and, in some error shapes, the
             // redirect uri — neither of which belongs in a page a visitor reads.
             return {state: 'refused', detail: 'Discord did not accept that authorisation'};
         }
-        accessToken = (body as Record<string, unknown>).access_token as string;
+        accessToken = grant.access_token;
     } catch {
         return {state: 'unavailable', detail: 'Discord could not be reached'};
     }
