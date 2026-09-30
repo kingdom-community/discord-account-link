@@ -108,9 +108,11 @@ describe('verifying with the default signer', () => {
         expect(other.verify(signer.sign('alice'))).toEqual({ok: false, reason: 'bad-signature'});
     });
 
-    it('checks the signature before decoding, so garbage that is not ours is not decoded', () => {
-        // Characters outside base64url in the payload half are a signature
-        // mismatch rather than a decode error, because decoding never runs.
+    it('calls a payload half outside base64url a bad signature, and never throws on junk', () => {
+        // The signature is compared before the payload is decoded, so junk in
+        // the payload half is reported as a mismatch. (Node's base64 decoder is
+        // lenient and would not throw here either way, so this pins the verdict,
+        // not the ordering.)
         expect(signer.verify('%%%not base64%%%.AAAA')).toEqual({ok: false, reason: 'bad-signature'});
         expect(() => signer.verify('x'.repeat(10_000))).not.toThrow();
     });
