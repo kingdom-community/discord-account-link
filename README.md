@@ -25,9 +25,12 @@ the test suite rather than by convention.
   so there is no Discord token in anybody's database to leak. The exchange and
   the identity read are one function precisely so there is no seam a caller could
   persist it through.
-- **Endpoints are pinned to Discord API v10**, not to an unversioned `/api/`, so
-  a version bump is a deliberate change in this package rather than a surprise in
-  production.
+- **The API endpoints are pinned to Discord API v10**, not to an unversioned
+  `/api/`, so a version bump is a deliberate change in this package rather than a
+  surprise in production. Both server-side calls — the token exchange and the
+  `/users/@me` read — go to `https://discord.com/api/v10/…`. The authorize URL the
+  browser is sent to is Discord's consent page, `https://discord.com/oauth2/authorize`,
+  which is not part of the versioned API.
 - **The flow refuses to render or start unless it is fully configured** — client
   id, client secret, base URL *and* the state-signing secret. Without the signing
   secret the `state` cannot be signed, and **an unsigned `state` is the one thing
@@ -181,13 +184,18 @@ verified identity is a small attack, but it is still an attack.
 `state` signing is a port:
 
 ```ts
+export type StateSignatureCheck =
+    | {ok: false; reason: 'malformed'}
+    | {ok: false; reason: 'bad-signature'}
+    | {ok: true; payload: string};
+
 export interface StateSigner {
     sign(payload: string): string;
-    verify(token: string):
-        | {ok: true; payload: string}
-        | {ok: false; reason: 'malformed' | 'bad-signature'};
+    verify(token: string): StateSignatureCheck;
 }
 ```
+
+Both types are exported, so an implementation can be annotated against them.
 
 Pass one in and `DISCORD_STATE_SECRET` is never read:
 
@@ -226,6 +234,8 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 | `discordLinkFlowFromEnv(options?)` | The ordinary entry point. Reads the environment, returns a flow that is already switched off if it should be. |
 | `createDiscordLinkFlow(options)` | Explicit construction: `config`, `signer`, optional `store`, `fetchImpl`, `timeoutMs`, `now`. |
 | `flow.configured()` / `discordLinkingConfigured(env?)` | The gate. |
+| `discordLinkConfigFromEnv(env?)` / `stateSecretFromEnv(env?)` | The two halves the gate reads: the `{clientId, clientSecret, redirectUri}` config or `null`, and the state-signing secret or `''`. |
+| `ENV_CLIENT_ID` / `ENV_CLIENT_SECRET` / `ENV_STATE_SECRET` / `ENV_BASE_URL` / `ENV_CALLBACK_PATH` / `DEFAULT_CALLBACK_PATH` | The environment variable names from the Configuration table, and the callback-path default. |
 | `flow.begin(username)` | `{state:'ok', url, oauthState}`, `{state:'not-configured'}`, or `{state:'unauthenticated'}` for an empty username. |
 | `flow.complete(params)` | Verified identity, without touching the store. |
 | `flow.link(params)` | `complete` plus a write to the store. |
@@ -233,12 +243,16 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 | `createHmacStateSigner(secret)` | The default signer, or `null`. |
 | `issueState` / `verifyState` / `STATE_TTL_MS` | The signed, session-bound state, if you want it directly. |
 | `authorizeUrl` / `exchangeCodeForIdentity` | The raw two steps. |
+| `DISCORD_AUTHORIZE_URL` / `DISCORD_TOKEN_URL` / `DISCORD_IDENTITY_URL` / `DISCORD_SCOPE` / `DISCORD_TIMEOUT_MS` | The pinned endpoints, the one scope, and the per-call timeout. |
+| `DISCORD_USERNAME_MAX_LENGTH` | The length (64) the identity's `username` is truncated to. That field is Discord's `global_name` when set, otherwise the handle. |
 | `callbackResponse` / `unlinkResponse` | Framework-agnostic status/body decision tables. |
 | `activeSessionFrom` | Picks the rotated token over the cookie token when a session was renewed mid-request. |
 | `linkOutcomeFrom` / `refusalFrom` | Status-to-outcome mapping for a store backed by your own HTTP API. |
 
-State lives for ten minutes (`STATE_TTL_MS`). Discord calls time out after eight
-seconds — somebody is sitting in front of a redirect waiting for them.
+State lives for ten minutes (`STATE_TTL_MS`). Each Discord call times out after
+eight seconds (`DISCORD_TIMEOUT_MS`, overridable with `timeoutMs`) — somebody is
+sitting in front of a redirect waiting for them. Finishing a link makes two such
+calls in sequence, the token exchange and then `/users/@me`.
 
 ## What is deliberately not here
 
