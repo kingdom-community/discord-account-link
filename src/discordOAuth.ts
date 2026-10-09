@@ -16,9 +16,12 @@
 
 import type {DiscordLinkConfig} from './config.js';
 
-// Discord's own endpoints. Pinned to the documented v10 API rather than to
+// Discord's own endpoints. The two server-side API calls — the token exchange
+// and the identity read — are pinned to the documented v10 API rather than to
 // whatever `/api/` resolves to today, so a version bump is a change here rather
-// than a surprise in production.
+// than a surprise in production. The authorize URL is not one of them: it is
+// the consent page the browser is sent to, which is not part of the versioned
+// API.
 export const DISCORD_AUTHORIZE_URL = 'https://discord.com/oauth2/authorize';
 export const DISCORD_TOKEN_URL = 'https://discord.com/api/v10/oauth2/token';
 export const DISCORD_IDENTITY_URL = 'https://discord.com/api/v10/users/@me';
