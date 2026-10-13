@@ -2,12 +2,17 @@ import {describe, expect, it} from 'vitest';
 
 import {
     DEFAULT_CALLBACK_PATH,
+    DISCORD_IDENTITY_URL,
+    DISCORD_TOKEN_URL,
+    STATE_TTL_MS,
     discordLinkConfigFromEnv,
     discordLinkFlowFromEnv,
     discordLinkingConfigured,
+    type AccountLinkStore,
     type EnvSource,
     type FromEnvOptions
 } from '../src/index.js';
+import {stubFetch} from './support/fetchStub.js';
 
 // The gate. Deployments with no Discord application are ordinary, and the
 // library has to be usable in one: hide the affordance rather than offering a
@@ -120,5 +125,65 @@ describe('building a flow from the environment', () => {
         // is no signer", and an unsigned state is the one thing this flow must
         // never accept — so the environment does not get to override it.
         expect(discordLinkFlowFromEnv({env: FULL, signer: null}).configured()).toBe(false);
+    });
+
+    it('sends the browser to the redirect uri the environment describes', () => {
+        const begun = discordLinkFlowFromEnv({env: {...FULL, DISCORD_CALLBACK_PATH: '/oauth/discord'}})
+            .begin('alice');
+        if (begun.state !== 'ok') {
+            throw new Error(`expected an authorize url, got ${begun.state}`);
+        }
+        const parameters = new URL(begun.url).searchParams;
+
+        expect(parameters.get('client_id')).toBe('client-id-1234');
+        expect(parameters.get('redirect_uri')).toBe('https://community.example/oauth/discord');
+    });
+
+    it('hands the injected fetch and store through to the flow', async () => {
+        // Were either dropped on the way through, the first would mean a real
+        // request to Discord and the second a link that is never recorded.
+        const {calls, fetchImpl} = stubFetch([
+            {status: 200, body: {access_token: 'discord-access-token-do-not-leak', token_type: 'Bearer'}},
+            {status: 200, body: {id: '112233445566778899', username: 'alice_mc', global_name: 'Alice'}}
+        ]);
+        const saved: unknown[] = [];
+        const store: AccountLinkStore = {
+            saveDiscordLink: async (input) => {
+                saved.push(input);
+                return {state: 'ok', value: null};
+            },
+            removeDiscordLink: async () => ({state: 'ok', value: {unlinked: true}})
+        };
+        const flow = discordLinkFlowFromEnv({env: FULL, fetchImpl, store});
+        const begun = flow.begin('alice');
+        if (begun.state !== 'ok') {
+            throw new Error(`expected an authorize url, got ${begun.state}`);
+        }
+
+        const outcome = await flow.link({accountUsername: 'alice', code: 'the-code', state: begun.oauthState});
+
+        const identity = {id: '112233445566778899', username: 'Alice'};
+        expect(outcome).toEqual({state: 'ok', identity});
+        expect(calls.map((call) => call.url)).toEqual([DISCORD_TOKEN_URL, DISCORD_IDENTITY_URL]);
+        expect(saved).toEqual([{accountUsername: 'alice', identity}]);
+    });
+
+    it('reads the time from the injected clock', async () => {
+        // The state is issued and checked against the same clock. Were the
+        // clock dropped, both would read the wall clock, the state would still
+        // be fresh, and the code would be exchanged.
+        let clock = 1_000_000;
+        const {calls, fetchImpl} = stubFetch([]);
+        const flow = discordLinkFlowFromEnv({env: FULL, fetchImpl, now: () => clock});
+        const begun = flow.begin('alice');
+        if (begun.state !== 'ok') {
+            throw new Error(`expected an authorize url, got ${begun.state}`);
+        }
+
+        clock += STATE_TTL_MS;
+
+        expect(await flow.complete({accountUsername: 'alice', code: 'the-code', state: begun.oauthState}))
+            .toEqual({state: 'invalid-state', reason: 'expired'});
+        expect(calls).toHaveLength(0);
     });
 });
