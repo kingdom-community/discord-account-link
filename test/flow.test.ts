@@ -503,6 +503,24 @@ describe('recording and removing the link', () => {
         expect(await flow.unlink('alice')).toEqual({state: 'ok', value: {unlinked: false}});
     });
 
+    it('refuses to unlink for an empty account without asking the store', async () => {
+        // `session?.username ?? ''` is what a signed-out request yields, and it
+        // must not become a delete keyed on the empty string.
+        const removed: string[] = [];
+        const store: AccountLinkStore = {
+            saveDiscordLink: async () => ({state: 'ok', value: null}),
+            removeDiscordLink: async ({accountUsername}) => {
+                removed.push(accountUsername);
+                return {state: 'ok', value: {unlinked: true}};
+            }
+        };
+        const flow = createDiscordLinkFlow({config: null, signer: null, store});
+
+        expect(await flow.unlink('')).toEqual({state: 'unauthenticated'});
+        expect(await flow.unlink('   ')).toEqual({state: 'unauthenticated'});
+        expect(removed).toEqual([]);
+    });
+
     it('says so plainly when no store was provided', async () => {
         const {flow} = flowWith(SUCCESSFUL_EXCHANGE);
 
