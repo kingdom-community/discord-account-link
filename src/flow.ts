@@ -90,7 +90,8 @@ export interface DiscordLinkFlow {
     link(parameters: CallbackParameters): Promise<LinkFlowOutcome>;
     // Requires a store, but NOT a Discord application: an operator who removes
     // the application must not strand people who are already linked, so this is
-    // deliberately outside the configuration gate.
+    // deliberately outside the configuration gate. An empty or whitespace-only
+    // username is `unauthenticated` and never reaches the store.
     unlink(accountUsername: string): Promise<LinkOutcome<{unlinked: boolean}>>;
 }
 
@@ -207,6 +208,13 @@ export const createDiscordLinkFlow = (options: DiscordLinkFlowOptions): DiscordL
         async unlink(accountUsername: string): Promise<LinkOutcome<{unlinked: boolean}>> {
             if (!store) {
                 return {state: 'unavailable', detail: 'no account link store was provided'};
+            }
+            // The same rule `begin` applies, for the same reason: an empty
+            // account is nobody signed in, not an account to act on. Without
+            // this, `session?.username ?? ''` would reach the store as a
+            // delete keyed on the empty string.
+            if (unbindable(accountUsername)) {
+                return {state: 'unauthenticated'};
             }
             return store.removeDiscordLink({accountUsername});
         }

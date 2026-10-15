@@ -45,7 +45,8 @@ the test suite rather than by convention.
   binds to nothing — every signed-out browser shares that value, so each could
   finish another's flow. `issueState` will not mint one and `verifyState` will
   not accept one (`reason: 'unbound'`); `flow.begin` answers
-  `{state:'unauthenticated'}` so a route can tell that apart from a 503.
+  `{state:'unauthenticated'}` so a route can tell that apart from a 503, and
+  `flow.unlink` answers the same without calling the store.
 - **The signer is injected.** Signing is a two-method port; an HMAC-SHA256
   implementation ships in the box, and a site that already issues signed values
   to browsers can pass its own and keep one secret instead of two.
@@ -239,7 +240,7 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 | `flow.begin(username)` | `{state:'ok', url, oauthState}`, `{state:'not-configured'}`, or `{state:'unauthenticated'}` for an empty username. |
 | `flow.complete(params)` | Verified identity, without touching the store. |
 | `flow.link(params)` | `complete` plus a write to the store. |
-| `flow.unlink(username)` | Idempotent removal. Outside the gate. |
+| `flow.unlink(username)` | Idempotent removal. Outside the gate. `{state:'unauthenticated'}` for an empty username. |
 | `createHmacStateSigner(secret)` | The default signer, or `null`. |
 | `issueState` / `verifyState` / `STATE_TTL_MS` | The signed, session-bound state, if you want it directly. |
 | `authorizeUrl` / `exchangeCodeForIdentity` | The raw two steps. |
