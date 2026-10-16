@@ -93,8 +93,16 @@ const showDiscordButton = discordLinkingConfigured();
 ```
 
 Check it before an affordance is **rendered**, and check it again before a route
-**acts** — `flow.configured()` is the same gate, and every flow method already
-answers `{state: 'not-configured'}` rather than half-running.
+**acts** — `flow.configured()` is the same gate, and `begin`, `complete` and
+`link` already answer `{state: 'not-configured'}` rather than half-running.
+`unlink` is the exception, deliberately: it sits outside the gate (see
+*Unlinking* below).
+
+If you [bring your own signer](#bringing-your-own-signer), the two are no longer
+the same gate. `discordLinkingConfigured()` reads the environment only, so it
+still requires `DISCORD_STATE_SECRET` and answers `false` without it, even
+though a flow built with your signer is ready. Gate on `flow.configured()`
+instead — it reflects the signer the flow was actually given.
 
 ## Usage
 
