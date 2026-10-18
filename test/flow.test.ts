@@ -426,6 +426,54 @@ describe('the access token never escapes', () => {
     });
 });
 
+describe('reading the callback query', () => {
+    const validState = () => issueState('alice', signer) as string;
+
+    it('refuses a verified callback that carries no code, before talking to Discord', async () => {
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        // Absent, null, empty, and a repeated parameter with no values are all
+        // the same absence, and none of them is worth a round trip to Discord.
+        for (const code of [undefined, null, '', []]) {
+            expect(await flow.complete({accountUsername: 'alice', code, state: validState()}))
+                .toEqual({state: 'refused', detail: 'Discord did not return an authorisation code'});
+        }
+        expect(calls).toHaveLength(0);
+    });
+
+    it('uses the first value when a query parameter was repeated', async () => {
+        // Frameworks hand a repeated `?code=a&code=b` over as an array.
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        const outcome = await flow.complete({
+            accountUsername: 'alice',
+            code: ['first-code', 'second-code'],
+            state: [validState(), 'not-a-state']
+        });
+
+        expect(outcome).toEqual({state: 'ok', identity: {id: '112233445566778899', username: 'Alice'}});
+        expect(new URLSearchParams(calls[0]!.body ?? '').get('code')).toBe('first-code');
+    });
+
+    it('reports a cancellation even when the state is unusable', async () => {
+        // Cancel is read before the state: a person who pressed Cancel has no
+        // code to exchange, and telling them their state was invalid is a lie.
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        expect(await flow.complete({accountUsername: 'alice', state: 'garbage', error: ['access_denied', 'other']}))
+            .toEqual({state: 'denied', detail: 'access_denied'});
+        expect(calls).toHaveLength(0);
+    });
+
+    it('ignores an empty error parameter rather than reporting a cancellation', async () => {
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        expect(await flow.complete({accountUsername: 'alice', code: 'c', state: validState(), error: ''}))
+            .toEqual({state: 'ok', identity: {id: '112233445566778899', username: 'Alice'}});
+        expect(calls).toHaveLength(2);
+    });
+});
+
 describe('recording and removing the link', () => {
     const validState = () => issueState('alice', signer) as string;
 
@@ -462,6 +510,27 @@ describe('recording and removing the link', () => {
             code: null,
             status: null
         });
+    });
+
+    it('passes a store outage through unchanged, after Discord verified the identity', async () => {
+        // Discord was reached and answered; the site's own back end is what
+        // failed. `callbackResponse` currently renders this the same as a
+        // Discord outage — see issue #21.
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE, storeReturning({
+            state: 'unavailable',
+            detail: 'the account service answered HTTP 502'
+        }));
+
+        expect(await flow.link({accountUsername: 'alice', code: 'c', state: validState()}))
+            .toEqual({state: 'unavailable', detail: 'the account service answered HTTP 502'});
+        expect(calls).toHaveLength(2);
+    });
+
+    it('passes a store that lost the session through as unauthenticated', async () => {
+        const {flow} = flowWith(SUCCESSFUL_EXCHANGE, storeReturning({state: 'unauthenticated'}));
+
+        expect(await flow.link({accountUsername: 'alice', code: 'c', state: validState()}))
+            .toEqual({state: 'unauthenticated'});
     });
 
     it('does not write to the store when the state was invalid', async () => {
