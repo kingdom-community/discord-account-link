@@ -28,8 +28,51 @@ describe('the callback response table', () => {
             .toBe('wrong-session');
     });
 
+    it('names the switched-off feature with the same code a begin route answers', () => {
+        // The README's begin route answers `discord_linking_unavailable` for
+        // the same fact, so a page handling either route can branch on one code.
+        expect(callbackResponse({state: 'not-configured'}).body).toEqual({
+            error: 'discord_linking_unavailable',
+            message: 'Discord linking is not available on this site.'
+        });
+    });
+
     it('does not treat a cancelled consent screen as a server problem', () => {
         expect(callbackResponse({state: 'denied', detail: 'access_denied'}).status).toBe(400);
+    });
+
+    it('tells somebody who pressed Cancel that nothing changed, without echoing Discord\'s parameter', () => {
+        // Asserted over the whole body: the `detail` is whatever arrived in the
+        // callback URL's `error` parameter, and it is not repeated to the page.
+        const response = callbackResponse({state: 'denied', detail: 'access_denied_sentinel'});
+
+        expect(response.body).toEqual({
+            error: 'consent_denied',
+            message: 'Discord linking was cancelled. Nothing has changed on your account.'
+        });
+    });
+
+    it('answers 400 for a state failure and carries nothing but the code, the reason and the sentence', () => {
+        const response = callbackResponse({state: 'invalid-state', reason: 'expired'});
+
+        expect(response.status).toBe(400);
+        expect(response.body).toEqual({
+            error: 'invalid_state',
+            reason: 'expired',
+            message: 'That link could not be completed. Please start again from your account page.'
+        });
+    });
+
+    it('falls back on a refusal\'s status and code independently of each other', () => {
+        // Each field has its own fallback, so a refusal that carries only one
+        // of the two keeps it rather than losing both.
+        const codeOnly = callbackResponse({state: 'refused', detail: 'No.', code: 'link_locked', status: null});
+        expect(codeOnly.status).toBe(400);
+        expect(codeOnly.body).toEqual({error: 'link_locked', message: 'No.'});
+
+        const statusOnly = callbackResponse({state: 'refused', detail: 'No.', code: null, status: 403});
+        expect(statusOnly.status).toBe(403);
+        expect(statusOnly.body).toEqual({error: 'refused', message: 'No.'});
     });
 
     it('forwards a store refusal with its own status and code', () => {
@@ -127,6 +170,19 @@ describe('the unlink response table', () => {
         const response = unlinkResponse({state: 'unavailable', detail: 'http://accounts.internal:8080 refused'});
 
         expect(JSON.stringify(response.body)).not.toContain('accounts.internal');
+    });
+
+    it('answers 503 for an unavailable store and names linking rather than Discord', () => {
+        // An unlink never talks to Discord, so the outage it reports is the
+        // store's; the body says so in neutral terms.
+        const response = unlinkResponse({state: 'unavailable', detail: 'no account link store was provided'});
+
+        expect(response.status).toBe(503);
+        expect(response.headers).toEqual({'Cache-Control': 'no-store'});
+        expect(response.body).toEqual({
+            error: 'link_unavailable',
+            message: 'Account linking is not available right now. Please try again shortly.'
+        });
     });
 });
 
