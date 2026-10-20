@@ -228,9 +228,47 @@ describe('mapping a store HTTP response to an outcome', () => {
             .toEqual({state: 'unavailable', detail: 'the account service answered HTTP 200'});
     });
 
+    it('refuses on 400 and 403 by default, not only on 409', () => {
+        expect(linkOutcomeFrom({status: 400, body: {error: 'bad_handle', message: 'Not a handle.'}}, {
+            read: () => null
+        })).toEqual({state: 'refused', status: 400, code: 'bad_handle', message: 'Not a handle.'});
+        expect(linkOutcomeFrom({status: 403, body: {error: 'forbidden', message: 'Not yours to link.'}}, {
+            read: () => null
+        })).toEqual({state: 'refused', status: 403, code: 'forbidden', message: 'Not yours to link.'});
+    });
+
+    it('answers 401 as unauthenticated even when the mapping names it a refusal', () => {
+        // An expired session is something the visitor fixes by signing in
+        // again, not by reading a sentence from the store.
+        expect(linkOutcomeFrom({status: 401, body: {error: 'expired', message: 'Sign in again.'}}, {
+            read: () => null,
+            refusalStatuses: [401]
+        })).toEqual({state: 'unauthenticated'});
+    });
+
+    it('keeps a falsy success value rather than reading it as an unrecognised shape', () => {
+        // Only null means "not recognised"; false and 0 are answers.
+        expect(linkOutcomeFrom({status: 200, body: {}}, {read: () => false}))
+            .toEqual({state: 'ok', value: false});
+        expect(linkOutcomeFrom({status: 201, body: {}}, {read: () => 0}))
+            .toEqual({state: 'ok', value: 0});
+    });
+
     it('supplies a sentence when the refusal body carried none', () => {
         expect(refusalFrom(403, null))
             .toEqual({state: 'refused', status: 403, code: 'refused', message: 'That could not be done.'});
+    });
+
+    it('falls back field by field when the refusal body is partial or not an object', () => {
+        // A code with no sentence keeps the code.
+        expect(refusalFrom(409, {error: 'taken'}))
+            .toEqual({state: 'refused', status: 409, code: 'taken', message: 'That could not be done.'});
+        // Fields that are present but not strings are not forwarded.
+        expect(refusalFrom(409, {error: 409, message: ['Already linked.']}))
+            .toEqual({state: 'refused', status: 409, code: 'refused', message: 'That could not be done.'});
+        // A bare string body, as some proxies answer, is not read as a message.
+        expect(refusalFrom(400, 'Bad Request'))
+            .toEqual({state: 'refused', status: 400, code: 'refused', message: 'That could not be done.'});
     });
 });
 
