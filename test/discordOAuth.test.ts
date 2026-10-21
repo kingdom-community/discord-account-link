@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
     DISCORD_AUTHORIZE_URL,
@@ -152,6 +152,19 @@ describe('exchanging the code', () => {
         expect(outcome).toEqual({state: 'refused', detail: 'Discord did not accept that authorisation'});
     });
 
+    it('refuses a grant Discord answered with a 4xx, even when the body carries a token', async () => {
+        // The status decides, not the shape: a token arriving on a 400 is not a
+        // grant, and it is not spent on the identity read. The second response
+        // is queued so that, were the read to happen, it would be recorded.
+        const {calls, outcome} = await exchangeWith([
+            {status: 400, body: {access_token: ACCESS_TOKEN}},
+            {status: 200, body: {id: '1', username: 'alice_mc'}}
+        ]);
+
+        expect(calls).toHaveLength(1);
+        expect(outcome).toEqual({state: 'refused', detail: 'Discord did not accept that authorisation'});
+    });
+
     it('does not forward Discord’s error body, which echoes the request', async () => {
         const {outcome} = await exchangeWith([
             {status: 400, body: {error: 'invalid_grant', error_description: 'client_id=client-id-1234'}}
@@ -210,6 +223,15 @@ describe('the identity that comes back', () => {
             expect(await identityFrom(body))
                 .toEqual({state: 'refused', detail: 'Discord did not return an account'});
         }
+    });
+
+    it('refuses an identity read Discord answered with a 4xx, whatever account the body names', async () => {
+        const {outcome} = await exchangeWith([
+            tokenGrant({access_token: ACCESS_TOKEN}),
+            {status: 401, body: {id: '1', username: 'alice_mc'}}
+        ]);
+
+        expect(outcome).toEqual({state: 'refused', detail: 'Discord did not return an account'});
     });
 
     it('carries nothing but an id and a username out of the package', async () => {
@@ -288,6 +310,33 @@ describe('the call to Discord is bounded', () => {
         expect(outcome).toEqual({state: 'ok', identity: {id: '1', username: 'alice_mc'}});
         expect(signals).toHaveLength(2);
         expect(signals.every((signal) => signal?.aborted === false)).toBe(true);
+    });
+});
+
+describe('the fetch the exchange falls back to', () => {
+    // Every other test injects `fetchImpl`. A caller that does not gets the
+    // global `fetch` — which is why the README asks for Node 18 — and a runtime
+    // with no global `fetch` at all still gets a value back rather than a throw.
+    afterEach(() => {
+        vi.unstubAllGlobals();
+    });
+
+    it('uses the global fetch when none is injected', async () => {
+        const {calls, fetchImpl} = stubFetch(identityOf({id: '1', username: 'alice_mc'}));
+        vi.stubGlobal('fetch', fetchImpl);
+
+        const outcome = await exchangeCodeForIdentity(CONFIG, 'the-code');
+
+        expect(outcome).toEqual({state: 'ok', identity: {id: '1', username: 'alice_mc'}});
+        expect(calls.map((call) => call.url)).toEqual([DISCORD_TOKEN_URL, DISCORD_IDENTITY_URL]);
+    });
+
+    it('degrades rather than throwing when there is no fetch anywhere', async () => {
+        vi.stubGlobal('fetch', undefined);
+
+        const outcome = await exchangeCodeForIdentity(CONFIG, 'the-code');
+
+        expect(outcome).toEqual({state: 'unavailable', detail: 'Discord could not be reached'});
     });
 });
 
