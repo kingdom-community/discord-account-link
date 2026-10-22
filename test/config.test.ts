@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
     DEFAULT_CALLBACK_PATH,
@@ -10,6 +10,7 @@ import {
     discordLinkingConfigured,
     type AccountLinkStore,
     type EnvSource,
+    type FetchLike,
     type FromEnvOptions
 } from '../src/index.js';
 import {stubFetch} from './support/fetchStub.js';
@@ -185,5 +186,68 @@ describe('building a flow from the environment', () => {
         expect(await flow.complete({accountUsername: 'alice', code: 'the-code', state: begun.oauthState}))
             .toEqual({state: 'invalid-state', reason: 'expired'});
         expect(calls).toHaveLength(0);
+    });
+
+    it('hands the injected timeout through to the call to Discord', async () => {
+        // Were the timeout dropped, the exchange would wait out the eight-second
+        // default and this test would time out long before it answered.
+        const signals: Array<AbortSignal | null | undefined> = [];
+        const fetchImpl: FetchLike = (_url, init) => new Promise<Response>((_resolve, reject) => {
+            signals.push(init.signal);
+            init.signal?.addEventListener('abort', () => reject(new Error('the request was aborted')));
+        });
+        const flow = discordLinkFlowFromEnv({env: FULL, fetchImpl, timeoutMs: 5});
+        const begun = flow.begin('alice');
+        if (begun.state !== 'ok') {
+            throw new Error(`expected an authorize url, got ${begun.state}`);
+        }
+
+        expect(await flow.complete({accountUsername: 'alice', code: 'the-code', state: begun.oauthState}))
+            .toEqual({state: 'unavailable', detail: 'Discord could not be reached'});
+        expect(signals).toHaveLength(1);
+        expect(signals[0]?.aborted).toBe(true);
+    });
+});
+
+describe('reading the process environment', () => {
+    // The README's ordinary usage passes no environment at all. Every value is
+    // stubbed, so whatever the machine running the suite has set cannot leak in.
+    const stubProcessEnv = (env: EnvSource) => {
+        for (const name of [...Object.keys(FULL), 'DISCORD_CALLBACK_PATH']) {
+            vi.stubEnv(name, env[name] ?? '');
+        }
+    };
+
+    afterEach(() => {
+        vi.unstubAllEnvs();
+    });
+
+    it('reads process.env when no environment is given', () => {
+        stubProcessEnv({...FULL, DISCORD_CALLBACK_PATH: '/from/process'});
+
+        expect(discordLinkingConfigured()).toBe(true);
+        expect(discordLinkConfigFromEnv()?.redirectUri).toBe('https://community.example/from/process');
+        const begun = discordLinkFlowFromEnv().begin('alice');
+        if (begun.state !== 'ok') {
+            throw new Error(`expected an authorize url, got ${begun.state}`);
+        }
+        expect(new URL(begun.url).searchParams.get('redirect_uri')).toBe('https://community.example/from/process');
+    });
+
+    it('is off when process.env is empty, which is the common case', () => {
+        stubProcessEnv({});
+
+        expect(discordLinkingConfigured()).toBe(false);
+        expect(discordLinkFlowFromEnv().configured()).toBe(false);
+    });
+
+    it('reads nothing from process.env once an environment is given', () => {
+        // A complete process environment must not fill the gaps in the one the
+        // caller passed — least of all the state secret.
+        stubProcessEnv(FULL);
+
+        expect(discordLinkFlowFromEnv({env: {}}).configured()).toBe(false);
+        expect(discordLinkFlowFromEnv({env: without('DISCORD_STATE_SECRET')}).configured()).toBe(false);
+        expect(discordLinkingConfigured(without('DISCORD_STATE_SECRET'))).toBe(false);
     });
 });
