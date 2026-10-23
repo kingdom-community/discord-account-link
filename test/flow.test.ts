@@ -73,6 +73,40 @@ describe('the configuration gate', () => {
         expect(calls).toHaveLength(0);
     });
 
+    it('is inert at the link route too, for either missing half, and writes nothing', async () => {
+        // The README promises `link` answers `not-configured` rather than
+        // half-running. With a store present, the gate is the only thing
+        // standing between a switched-off deployment and a write — and the
+        // state below is one this signer really issued, so nothing but the
+        // missing half can be what refuses it.
+        const halves = [
+            {name: 'no Discord application', config: null, signer},
+            {name: 'no state signer', config: CONFIG, signer: null}
+        ];
+        for (const half of halves) {
+            const saves: unknown[] = [];
+            const store: AccountLinkStore = {
+                saveDiscordLink: async (input) => {
+                    saves.push(input);
+                    return {state: 'ok', value: null};
+                },
+                removeDiscordLink: async () => ({state: 'ok', value: {unlinked: true}})
+            };
+            const {calls, fetchImpl} = stubFetch(SUCCESSFUL_EXCHANGE);
+            const flow = createDiscordLinkFlow({config: half.config, signer: half.signer, store, fetchImpl});
+
+            const outcome = await flow.link({
+                accountUsername: 'alice',
+                code: 'the-code',
+                state: issueState('alice', signer) as string
+            });
+
+            expect(outcome, half.name).toEqual({state: 'not-configured'});
+            expect(calls, half.name).toHaveLength(0);
+            expect(saves, half.name).toEqual([]);
+        }
+    });
+
     it('is on when everything is present', () => {
         const {flow} = flowWith([]);
 
