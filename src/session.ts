@@ -24,7 +24,9 @@ export interface ActiveSession {
 export interface ResolvedSessionLike {
     // Null when nobody is signed in, or when the session could not be checked.
     username: string | null | undefined;
-    // Set only when the session was renewed while serving this request.
+    // Set only when the session was renewed while serving this request. An empty
+    // string is read as "nothing rotated", like an absent one, so a session
+    // layer that reports it that way does not cost the visitor their cookie.
     rotatedToken?: string | null;
 }
 
@@ -35,7 +37,7 @@ export const activeSessionFrom = (
     if (!resolved.username) {
         return null;
     }
-    const token = resolved.rotatedToken ?? cookieToken;
+    const token = resolved.rotatedToken || cookieToken;
     if (!token) {
         return null;
     }
