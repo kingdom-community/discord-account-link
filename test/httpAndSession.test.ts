@@ -285,6 +285,14 @@ describe('resolving the active session', () => {
             .toEqual({username: 'alice', token: 'cookie-token'});
     });
 
+    it('reads an empty rotated token as nothing rotated', () => {
+        // An empty string is absence everywhere else in the package; choosing it
+        // over the cookie token would sign out a perfectly valid session.
+        expect(activeSessionFrom({username: 'alice', rotatedToken: ''}, 'cookie-token'))
+            .toEqual({username: 'alice', token: 'cookie-token'});
+        expect(activeSessionFrom({username: 'alice', rotatedToken: ''}, null)).toBeNull();
+    });
+
     it('is null when nobody is signed in or there is no token to forward', () => {
         expect(activeSessionFrom({username: null}, 'cookie-token')).toBeNull();
         expect(activeSessionFrom({username: 'alice'}, null)).toBeNull();
