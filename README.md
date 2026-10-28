@@ -71,7 +71,12 @@ Node 18 or newer (it uses the global `fetch`). Types are included.
 
 The redirect URI is `SITE_BASE_URL` + the callback path, and it must be
 registered on the Discord application **character for character** — a mismatch is
-refused by Discord on an error page your site never sees.
+refused by Discord on an error page your site never sees. Register the URI as the
+package builds it: trailing slashes on `SITE_BASE_URL` are dropped, and a callback
+path without a leading `/` is given one, so `https://community.example/` and
+`oauth/discord` become `https://community.example/oauth/discord`.
+
+Every value is trimmed, and one that is empty or only whitespace counts as unset.
 
 `SITE_BASE_URL` has no default on purpose. In frameworks that inline public
 environment variables at build time, an image built without one cannot acquire it
@@ -245,10 +250,10 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 | `flow.configured()` / `discordLinkingConfigured(env?)` | The gate. |
 | `discordLinkConfigFromEnv(env?)` / `stateSecretFromEnv(env?)` | The two halves the gate reads: the `{clientId, clientSecret, redirectUri}` config or `null`, and the state-signing secret or `''`. |
 | `ENV_CLIENT_ID` / `ENV_CLIENT_SECRET` / `ENV_STATE_SECRET` / `ENV_BASE_URL` / `ENV_CALLBACK_PATH` / `DEFAULT_CALLBACK_PATH` | The environment variable names from the Configuration table, and the callback-path default. |
-| `flow.begin(username)` | `{state:'ok', url, oauthState}`, `{state:'not-configured'}`, or `{state:'unauthenticated'}` for an empty username. |
+| `flow.begin(username)` | `{state:'ok', url, oauthState}`, `{state:'not-configured'}`, or `{state:'unauthenticated'}` for an empty or whitespace-only username. |
 | `flow.complete(params)` | Verified identity, without touching the store. |
-| `flow.link(params)` | `complete` plus a write to the store. |
-| `flow.unlink(username)` | Idempotent removal. Outside the gate. `{state:'unauthenticated'}` for an empty username. |
+| `flow.link(params)` | `complete` plus a write to the store. `{state:'unavailable'}` if the flow was built without a store. |
+| `flow.unlink(username)` | Idempotent removal. Outside the gate. `{state:'unauthenticated'}` for an empty or whitespace-only username, `{state:'unavailable'}` if the flow was built without a store. |
 | `createHmacStateSigner(secret)` | The default signer, or `null`. |
 | `issueState` / `verifyState` / `STATE_TTL_MS` | The signed, session-bound state, if you want it directly. |
 | `authorizeUrl` / `exchangeCodeForIdentity` | The raw two steps. |
