@@ -30,7 +30,8 @@ export interface DiscordLinkConfig {
     redirectUri: string;
 }
 
-// The environment variable names read by `discordLinkConfigFromEnv`.
+// The environment variable names: the state secret is read by
+// `stateSecretFromEnv`, the other four by `discordLinkConfigFromEnv`.
 export const ENV_CLIENT_ID = 'DISCORD_CLIENT_ID';
 export const ENV_CLIENT_SECRET = 'DISCORD_CLIENT_SECRET';
 export const ENV_STATE_SECRET = 'DISCORD_STATE_SECRET';

@@ -245,7 +245,7 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 
 | Export | What it does |
 |---|---|
-| `discordLinkFlowFromEnv(options?)` | The ordinary entry point. Reads the environment, returns a flow that is already switched off if it should be. |
+| `discordLinkFlowFromEnv(options?)` | The ordinary entry point. Reads the environment, returns a flow that is already switched off if it should be. Optional `env` (defaults to `process.env`), `store`, `signer`, `fetchImpl`, `timeoutMs`, `now`; a `signer` of `null` switches the flow off rather than falling back to `DISCORD_STATE_SECRET`. |
 | `createDiscordLinkFlow(options)` | Explicit construction: `config`, `signer`, optional `store`, `fetchImpl`, `timeoutMs`, `now`. |
 | `flow.configured()` / `discordLinkingConfigured(env?)` | The gate. |
 | `discordLinkConfigFromEnv(env?)` / `stateSecretFromEnv(env?)` | The two halves the gate reads: the `{clientId, clientSecret, redirectUri}` config or `null`, and the state-signing secret or `''`. |

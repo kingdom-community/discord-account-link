@@ -1,9 +1,10 @@
 // The ordinary way to build the flow: read the environment, and get a flow that
 // is already switched off if the environment says it should be.
 //
-// This is the only module that touches `process.env`, so "where is this value
-// read" stays an answerable question. Everything else takes its configuration
-// as an argument.
+// `process.env` is read here and as the default `env` argument of the three
+// readers in `config.ts`, and nowhere else, so "where is this value read" stays
+// an answerable question. Everything else takes its configuration as an
+// argument.
 
 import {discordLinkConfigFromEnv, stateSecretFromEnv, type EnvSource} from './config.js';
 import {createDiscordLinkFlow, type DiscordLinkFlow} from './flow.js';
