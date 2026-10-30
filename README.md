@@ -46,7 +46,12 @@ the test suite rather than by convention.
   finish another's flow. `issueState` will not mint one and `verifyState` will
   not accept one (`reason: 'unbound'`); `flow.begin` answers
   `{state:'unauthenticated'}` so a route can tell that apart from a 503, and
-  `flow.unlink` answers the same without calling the store.
+  `flow.unlink` answers the same without calling the store. The callback end is
+  different: `flow.complete` and `flow.link` answer
+  `{state:'invalid-state', reason:'unbound'}`, before Discord is contacted and
+  without a write to the store, so `callbackResponse` renders a signed-out
+  callback as a 400 `invalid_state`, not a 401. The `unauthenticated` a
+  `flow.link` outcome can carry comes only from the store.
 - **The signer is injected.** Signing is a two-method port; an HMAC-SHA256
   implementation ships in the box, and a site that already issues signed values
   to browsers can pass its own and keep one secret instead of two.
