@@ -631,6 +631,21 @@ describe('recording and removing the link', () => {
             .toBe('unavailable');
         expect((await flow.unlink('alice')).state).toBe('unavailable');
     });
+
+    it('checks for a store before the configuration gate and before Discord is contacted', async () => {
+        // A store-less `link` answers `unavailable` whatever the configuration,
+        // so a route cannot rely on it to report `not-configured`; gate on
+        // `configured()` instead. Either way, nothing reaches Discord.
+        const NO_STORE = {state: 'unavailable', detail: 'no account link store was provided'};
+        const unconfigured = createDiscordLinkFlow({config: null, signer: null});
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        expect(await unconfigured.link({accountUsername: 'alice', code: 'c', state: validState()}))
+            .toEqual(NO_STORE);
+        expect(await flow.link({accountUsername: 'alice', code: 'c', state: validState()}))
+            .toEqual(NO_STORE);
+        expect(calls).toEqual([]);
+    });
 });
 
 describe('Discord is a link, not a login', () => {

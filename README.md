@@ -106,7 +106,9 @@ Check it before an affordance is **rendered**, and check it again before a route
 **acts** — `flow.configured()` is the same gate, and `begin`, `complete` and
 `link` already answer `{state: 'not-configured'}` rather than half-running.
 `unlink` is the exception, deliberately: it sits outside the gate (see
-*Unlinking* below).
+*Unlinking* below). `link` checks for a store before it checks the gate, so a
+flow built without a store answers `{state: 'unavailable'}` from `link` however
+it is configured — gate on `configured()`, not on that outcome.
 
 If you [bring your own signer](#bringing-your-own-signer), the two are no longer
 the same gate. `discordLinkingConfigured()` reads the environment only, so it
@@ -257,7 +259,7 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 | `ENV_CLIENT_ID` / `ENV_CLIENT_SECRET` / `ENV_STATE_SECRET` / `ENV_BASE_URL` / `ENV_CALLBACK_PATH` / `DEFAULT_CALLBACK_PATH` | The environment variable names from the Configuration table, and the callback-path default. |
 | `flow.begin(username)` | `{state:'ok', url, oauthState}`, `{state:'not-configured'}`, or `{state:'unauthenticated'}` for an empty or whitespace-only username. |
 | `flow.complete(params)` | Verified identity, without touching the store. |
-| `flow.link(params)` | `complete` plus a write to the store. `{state:'unavailable'}` if the flow was built without a store. |
+| `flow.link(params)` | `complete` plus a write to the store. `{state:'unavailable'}` if the flow was built without a store, checked before the configuration gate and before Discord is contacted. |
 | `flow.unlink(username)` | Idempotent removal. Outside the gate. `{state:'unauthenticated'}` for an empty or whitespace-only username, `{state:'unavailable'}` if the flow was built without a store. |
 | `createHmacStateSigner(secret)` | The default signer, or `null`. |
 | `issueState` / `verifyState` / `STATE_TTL_MS` | The signed, session-bound state, if you want it directly. |
