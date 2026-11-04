@@ -8,6 +8,7 @@ import {
     issueState,
     type AccountLinkStore,
     type DiscordLinkConfig,
+    type LinkFlowOutcome,
     type LinkOutcome
 } from '../src/index.js';
 import {stubFetch, type StubResponse} from './support/fetchStub.js';
@@ -583,6 +584,99 @@ describe('recording and removing the link', () => {
         expect(written).toBe(false);
     });
 
+    // The state was good on every one of these, so the only thing keeping the
+    // store out of it is that Discord never verified an identity. Each outcome
+    // is asserted whole: the store's write is the most sensitive step in the
+    // flow, and an identity must have been verified before it happens.
+    const UNVERIFIED: Array<{
+        name: string;
+        query: {code?: string; error?: string};
+        responses: StubResponse[];
+        outcome: LinkFlowOutcome;
+        discordCalls: number;
+    }> = [
+        {
+            name: 'the person pressed Cancel',
+            query: {error: 'access_denied'},
+            responses: [],
+            outcome: {state: 'denied', detail: 'access_denied'},
+            discordCalls: 0
+        },
+        {
+            name: 'Discord sent no code',
+            query: {},
+            responses: [],
+            outcome: {
+                state: 'refused',
+                detail: 'Discord did not return an authorisation code',
+                code: null,
+                status: null
+            },
+            discordCalls: 0
+        },
+        {
+            name: 'Discord refused the grant',
+            query: {code: 'c'},
+            responses: [{status: 400, body: {error: 'invalid_grant'}}],
+            outcome: {
+                state: 'refused',
+                detail: 'Discord did not accept that authorisation',
+                code: null,
+                status: null
+            },
+            discordCalls: 1
+        },
+        {
+            name: 'the token endpoint could not be reached',
+            query: {code: 'c'},
+            responses: [{status: 0, networkError: true}],
+            outcome: {state: 'unavailable', detail: 'Discord could not be reached'},
+            discordCalls: 1
+        },
+        {
+            name: 'the token endpoint was down',
+            query: {code: 'c'},
+            responses: [{status: 503}],
+            outcome: {state: 'unavailable', detail: 'Discord answered HTTP 503'},
+            discordCalls: 1
+        },
+        {
+            name: 'the identity read named no account',
+            query: {code: 'c'},
+            responses: [{status: 200, body: {access_token: ACCESS_TOKEN}}, {status: 401, body: {}}],
+            outcome: {
+                state: 'refused',
+                detail: 'Discord did not return an account',
+                code: null,
+                status: null
+            },
+            discordCalls: 2
+        },
+        {
+            name: 'the identity read was down',
+            query: {code: 'c'},
+            responses: [{status: 200, body: {access_token: ACCESS_TOKEN}}, {status: 503}],
+            outcome: {state: 'unavailable', detail: 'Discord answered HTTP 503'},
+            discordCalls: 2
+        }
+    ];
+
+    it.each(UNVERIFIED)('does not write to the store when $name', async ({query, responses, outcome, discordCalls}) => {
+        const saved: unknown[] = [];
+        const store: AccountLinkStore = {
+            saveDiscordLink: async (input) => {
+                saved.push(input);
+                return {state: 'ok', value: null};
+            },
+            removeDiscordLink: async () => ({state: 'ok', value: {unlinked: true}})
+        };
+        const {flow, calls} = flowWith(responses, store);
+
+        expect(await flow.link({accountUsername: 'alice', state: validState(), ...query})).toEqual(outcome);
+        expect(saved).toEqual([]);
+        expect(calls).toHaveLength(discordCalls);
+    });
+
     it('unlinks even when the Discord application is gone', async () => {
         // An operator who removes the application must not strand people who
         // are already linked, so unlink is deliberately outside the gate.
@@ -604,6 +698,36 @@ describe('recording and removing the link', () => {
         });
 
         expect(await flow.unlink('alice')).toEqual({state: 'ok', value: {unlinked: false}});
+    });
+
+    it('asks the store to remove exactly the account it was given, once', async () => {
+        const removed: unknown[] = [];
+        const store: AccountLinkStore = {
+            saveDiscordLink: async () => ({state: 'ok', value: null}),
+            removeDiscordLink: async (input) => {
+                removed.push(input);
+                return {state: 'ok', value: {unlinked: true}};
+            }
+        };
+        const flow = createDiscordLinkFlow({config: CONFIG, signer, store});
+
+        await flow.unlink('alice');
+
+        expect(removed).toEqual([{accountUsername: 'alice'}]);
+    });
+
+    it.each<[string, LinkOutcome<{unlinked: boolean}>]>([
+        ['a refusal', {state: 'refused', status: 403, code: 'link_locked', message: 'Staff have locked that link.'}],
+        ['an outage', {state: 'unavailable', detail: 'the account service answered HTTP 502'}],
+        ['a lost session', {state: 'unauthenticated'}]
+    ])('passes %s from the store through unchanged', async (_name, answer) => {
+        const flow = createDiscordLinkFlow({
+            config: CONFIG,
+            signer,
+            store: storeReturning({state: 'ok', value: null}, answer)
+        });
+
+        expect(await flow.unlink('alice')).toEqual(answer);
     });
 
     it('refuses to unlink for an empty account without asking the store', async () => {
