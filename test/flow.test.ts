@@ -253,6 +253,17 @@ describe('completing the flow', () => {
         expect(calls).toHaveLength(0);
     });
 
+    it('refuses a signed null payload with an outcome rather than a rejection', async () => {
+        // A signer shared with the rest of the site can sign `null`. The route
+        // branches on the outcome, so a rejected promise leaves it with nothing
+        // to branch on.
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        await expect(flow.complete({accountUsername: 'alice', code: 'c', state: signer.sign('null')}))
+            .resolves.toEqual({state: 'invalid-state', reason: 'malformed'});
+        expect(calls).toHaveLength(0);
+    });
+
     it('refuses a state signed with somebody else’s secret', async () => {
         const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
         const forged = issueState('alice', createHmacStateSigner('some-other-secret')!) as string;

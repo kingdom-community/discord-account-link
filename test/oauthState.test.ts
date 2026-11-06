@@ -150,6 +150,17 @@ describe('verifying a state', () => {
             .toEqual({ok: false, reason: 'malformed'});
     });
 
+    it('answers malformed, without throwing, for a signed JSON value that is not an object', () => {
+        // `null` is the sharp one: it parses, so the `try` around `JSON.parse`
+        // catches nothing, and reading a field off it throws. The others read
+        // as undefined. A verdict is owed for all of them, because a throw
+        // here is a 500 on a path that exists to refuse politely.
+        for (const payload of ['null', '42', '"text"', 'true', '[]']) {
+            expect(verifyState(signer.sign(payload), 'alice', signer))
+                .toEqual({ok: false, reason: 'malformed'});
+        }
+    });
+
     it('takes the first value when a query string repeats the parameter', () => {
         const state = issueState('alice', signer) as string;
 
