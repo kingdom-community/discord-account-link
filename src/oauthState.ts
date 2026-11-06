@@ -136,13 +136,17 @@ export const verifyState = (
         return {ok: false, reason: checked.reason};
     }
 
-    let payload: StatePayload;
+    // `| null` because the JSON literal `null` parses without complaint, so the
+    // `catch` below never sees it. Every other non-object value reads as
+    // undefined at the field checks, but a field read on null throws, and a
+    // refusal must be a verdict rather than a rejected promise in the route.
+    let payload: StatePayload | null;
     try {
-        payload = JSON.parse(checked.payload) as StatePayload;
+        payload = JSON.parse(checked.payload) as StatePayload | null;
     } catch {
         return {ok: false, reason: 'malformed'};
     }
-    if (typeof payload.u !== 'string' || typeof payload.e !== 'number') {
+    if (payload === null || typeof payload.u !== 'string' || typeof payload.e !== 'number') {
         return {ok: false, reason: 'malformed'};
     }
     if (payload.e <= now) {
