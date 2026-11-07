@@ -297,6 +297,56 @@ describe('the call to Discord is bounded', () => {
         expect(outcome).toEqual({state: 'unavailable', detail: 'Discord could not be reached'});
     });
 
+    // What a real `fetch` does when the stall comes later: it settles on the
+    // headers, and the body is read afterwards under the same signal.
+    const stalledBody = (init: RequestInit): Response => ({
+        status: 200,
+        ok: true,
+        json: () => new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(new Error('the body read was aborted')));
+        })
+    } as unknown as Response);
+
+    it('bounds the body of the grant, not merely its headers', async () => {
+        const urls: string[] = [];
+        const fetchImpl: FetchLike = async (url, init) => {
+            urls.push(url);
+            return stalledBody(init);
+        };
+
+        const outcome = await exchangeCodeForIdentity(CONFIG, 'the-code', {fetchImpl, timeoutMs: 5});
+
+        // `unavailable`, not `refused`: the aborted read must not pass for a
+        // body that was not JSON, because Discord has not said no to anything.
+        expect(outcome).toEqual({state: 'unavailable', detail: 'Discord could not be reached'});
+        expect(urls).toEqual([DISCORD_TOKEN_URL]);
+    });
+
+    it('bounds the body of the identity read too', async () => {
+        const fetchImpl: FetchLike = async (url, init) => {
+            if (url === DISCORD_TOKEN_URL) {
+                return {
+                    status: 200,
+                    ok: true,
+                    json: async () => ({access_token: ACCESS_TOKEN})
+                } as unknown as Response;
+            }
+            return stalledBody(init);
+        };
+
+        const outcome = await exchangeCodeForIdentity(CONFIG, 'the-code', {fetchImpl, timeoutMs: 5});
+
+        expect(outcome).toEqual({state: 'unavailable', detail: 'Discord could not be reached'});
+    });
+
+    it('still refuses a body that arrived in time and was not JSON', async () => {
+        // The other side of the line above: bad JSON is an answer, and a stall
+        // is not.
+        const {outcome} = await exchangeWith([{status: 200, invalidJson: true}]);
+
+        expect(outcome).toEqual({state: 'refused', detail: 'Discord did not accept that authorisation'});
+    });
+
     it('leaves the signal alone when Discord answers in time', async () => {
         const signals: Array<AbortSignal | null | undefined> = [];
         const {fetchImpl} = stubFetch(identityOf({id: '1', username: 'alice_mc'}));
