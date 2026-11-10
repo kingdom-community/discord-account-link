@@ -83,11 +83,26 @@ export const authorizeUrl = (config: DiscordLinkConfig, state: string): string =
     return `${DISCORD_AUTHORIZE_URL}?${parameters.toString()}`;
 };
 
-const fetchWithTimeout = async (
+// What Discord answered, with the body already read. A 5xx carries no body,
+// because no caller looks at one.
+interface DiscordReply {
+    status: number;
+    ok: boolean;
+    body: unknown;
+}
+
+// One call to Discord, bounded from the request to the last byte of the body.
+//
+// `fetch` settles when the headers arrive, so a timer cleared at that point would
+// leave a body that stalls with no bound at all. The body is read in here, under
+// the same timer, for that reason. A body that cannot be parsed reads as null,
+// which the callers refuse; a read cut off by the timer must not, because Discord
+// has not said no to anything, so it throws for the callers' `catch` instead.
+const callDiscord = async (
     url: string,
     init: RequestInit,
     options: ExchangeOptions
-): Promise<Response> => {
+): Promise<DiscordReply> => {
     const call = options.fetchImpl ?? (globalThis.fetch as FetchLike | undefined);
     if (!call) {
         throw new Error('no fetch implementation available');
@@ -95,7 +110,15 @@ const fetchWithTimeout = async (
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DISCORD_TIMEOUT_MS);
     try {
-        return await call(url, {...init, signal: controller.signal});
+        const response = await call(url, {...init, signal: controller.signal});
+        if (response.status >= 500) {
+            return {status: response.status, ok: false, body: null};
+        }
+        const body: unknown = await response.json().catch(() => null);
+        if (controller.signal.aborted) {
+            throw new Error('Discord timed out');
+        }
+        return {status: response.status, ok: response.ok, body};
     } finally {
         clearTimeout(timer);
     }
@@ -116,7 +139,7 @@ export const exchangeCodeForIdentity = async (
 ): Promise<DiscordExchange> => {
     let accessToken: string;
     try {
-        const response = await fetchWithTimeout(DISCORD_TOKEN_URL, {
+        const reply = await callDiscord(DISCORD_TOKEN_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -130,15 +153,14 @@ export const exchangeCodeForIdentity = async (
                 redirect_uri: config.redirectUri
             }).toString()
         }, options);
-        if (response.status >= 500) {
-            return {state: 'unavailable', detail: `Discord answered HTTP ${response.status}`};
+        if (reply.status >= 500) {
+            return {state: 'unavailable', detail: `Discord answered HTTP ${reply.status}`};
         }
-        const body = await response.json().catch(() => null);
-        const grant = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
+        const grant = reply.body && typeof reply.body === 'object' ? (reply.body as Record<string, unknown>) : null;
         // An empty token is no token, the same way an empty `id` below is no
         // account: it would go out as a bare `Bearer ` header and buy nothing
         // but a second round trip to hear Discord say so.
-        if (!response.ok || !grant || typeof grant.access_token !== 'string' || grant.access_token === '') {
+        if (!reply.ok || !grant || typeof grant.access_token !== 'string' || grant.access_token === '') {
             // Deliberately does NOT forward Discord's error body. It echoes the
             // request, which carries the client id and, in some error shapes, the
             // redirect uri — neither of which belongs in a page a visitor reads.
@@ -150,16 +172,15 @@ export const exchangeCodeForIdentity = async (
     }
 
     try {
-        const response = await fetchWithTimeout(DISCORD_IDENTITY_URL, {
+        const reply = await callDiscord(DISCORD_IDENTITY_URL, {
             method: 'GET',
             headers: {Authorization: `Bearer ${accessToken}`, Accept: 'application/json'}
         }, options);
-        if (response.status >= 500) {
-            return {state: 'unavailable', detail: `Discord answered HTTP ${response.status}`};
+        if (reply.status >= 500) {
+            return {state: 'unavailable', detail: `Discord answered HTTP ${reply.status}`};
         }
-        const body = await response.json().catch(() => null);
-        const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : null;
-        if (!response.ok || !record || typeof record.id !== 'string' || record.id === '') {
+        const record = reply.body && typeof reply.body === 'object' ? (reply.body as Record<string, unknown>) : null;
+        if (!reply.ok || !record || typeof record.id !== 'string' || record.id === '') {
             return {state: 'refused', detail: 'Discord did not return an account'};
         }
         // `global_name` is the current display name and `username` the handle;
