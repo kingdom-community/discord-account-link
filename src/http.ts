@@ -21,8 +21,9 @@ import type {LinkOutcome} from './linkStore.js';
 export interface RouteResponse {
     status: number;
     body: Record<string, unknown>;
-    // Always. None of these answers is cacheable, and one of them is a redirect
-    // carrying a one-time state.
+    // Always. None of these answers is cacheable: each reports the outcome of a
+    // one-time callback or a state change, and replaying one from a cache would
+    // tell somebody something that is no longer true.
     headers: {'Cache-Control': 'no-store'};
 }
 
