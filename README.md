@@ -50,9 +50,10 @@ the test suite rather than by convention.
   different: `flow.complete` and `flow.link` answer
   `{state:'invalid-state', reason:'unbound'}`, before Discord is contacted and
   without a write to the store, so `callbackResponse` renders a signed-out
-  callback as a 400 `invalid_state`, not a 401. The one exception is a
-  cancelled consent screen: Discord's `error` parameter is read before the
-  `state`, so that callback answers `{state:'denied'}` whoever is signed in,
+  callback as a 400 `invalid_state`, not a 401. A cancelled consent screen is
+  answered differently: Discord's `error` parameter is read after the
+  configuration gate but before the `state`, so that callback answers
+  `{state:'denied'}` whoever is signed in,
   still without contacting Discord or writing to the store. The
   `unauthenticated` a `flow.link` outcome can carry comes only from the store.
 - **The signer is injected.** Signing is a two-method port; an HMAC-SHA256
