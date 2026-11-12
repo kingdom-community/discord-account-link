@@ -72,8 +72,9 @@ export interface CallbackParameters {
     // The account the session says is finishing the flow. The state is checked
     // against THIS, so it must be a real account identifier: an empty or
     // whitespace-only value — what `session?.username ?? ''` yields for a
-    // visitor who is not signed in — is refused as `invalid-state`/`unbound`
-    // rather than matching another empty one.
+    // visitor who is not signed in — is refused as `invalid-state` rather than
+    // matching another empty one. The reason is `unbound` once the state itself
+    // verifies; a missing, forged or expired state reports that reason first.
     accountUsername: string;
     code?: string | string[] | null;
     state?: string | string[] | null;

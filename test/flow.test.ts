@@ -406,6 +406,24 @@ describe('a callback for nobody', () => {
         expect(saves).toEqual([]);
         expect(calls).toHaveLength(0);
     });
+
+    it('reports a bad state ahead of the missing binding', async () => {
+        // The state is checked before the binding, so `unbound` is only the
+        // reason once the state itself verifies. A signed-out callback carrying
+        // a missing, forged or expired state is refused all the same, under the
+        // state's own reason, and still without a word to Discord.
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+        const forger = createHmacStateSigner('some-other-secret-0123456789')!;
+        const callback = (state: string | undefined) =>
+            flow.complete({accountUsername: '', code: 'the-code', state});
+
+        expect(await callback(undefined)).toEqual({state: 'invalid-state', reason: 'malformed'});
+        expect(await callback(forger.sign(JSON.stringify({n: 'nonce', u: 'alice', e: Date.now() + 600_000}))))
+            .toEqual({state: 'invalid-state', reason: 'bad-signature'});
+        expect(await callback(signer.sign(JSON.stringify({n: 'nonce', u: 'alice', e: Date.now() - 1}))))
+            .toEqual({state: 'invalid-state', reason: 'expired'});
+        expect(calls).toHaveLength(0);
+    });
 });
 
 describe('the access token never escapes', () => {
