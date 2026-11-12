@@ -47,10 +47,13 @@ the test suite rather than by convention.
   not accept one (`reason: 'unbound'`); `flow.begin` answers
   `{state:'unauthenticated'}` so a route can tell that apart from a 503, and
   `flow.unlink` answers the same without calling the store. The callback end is
-  different: `flow.complete` and `flow.link` answer
-  `{state:'invalid-state', reason:'unbound'}`, before Discord is contacted and
-  without a write to the store, so `callbackResponse` renders a signed-out
-  callback as a 400 `invalid_state`, not a 401. A cancelled consent screen is
+  different: `flow.complete` and `flow.link` answer `{state:'invalid-state'}`,
+  before Discord is contacted and without a write to the store, so
+  `callbackResponse` renders a signed-out callback as a 400 `invalid_state`, not
+  a 401. The `reason` is `'unbound'` once the state itself checks out; a state
+  that is missing, forged or expired reports that first (`malformed`,
+  `bad-signature`, `expired`), because the state is checked before the binding.
+  A cancelled consent screen is
   answered differently: Discord's `error` parameter is read after the
   configuration gate but before the `state`, so that callback answers
   `{state:'denied'}` whoever is signed in,
