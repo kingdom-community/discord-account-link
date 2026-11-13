@@ -207,6 +207,39 @@ Unlinking is a state change, so apply the same cross-origin check you apply to
 every other state change. A cross-site page silently detaching somebody's
 verified identity is a small attack, but it is still an attack.
 
+## What the routes answer
+
+`callbackResponse` and `unlinkResponse` turn an outcome into a status and a
+body. Every answer from either carries `Cache-Control: no-store`, and no
+`unavailable` answer repeats the outcome's `detail`, which is meant for an
+operator rather than the visitor.
+
+`callbackResponse(outcome)`, for the outcome of `flow.link`:
+
+| `outcome.state` | Status | `body.error` | Notes |
+|---|---|---|---|
+| `ok` | 200 | — | Body is `{linked: true, discord: {id, username}}` and nothing else. |
+| `not-configured` | 503 | `discord_linking_unavailable` | The feature is switched off; nothing is broken. |
+| `denied` | 400 | `consent_denied` | Discord's `error` parameter is not echoed. |
+| `invalid-state` | 400 | `invalid_state` | The body also carries `reason`; the sentence is the same for every reason. |
+| `unauthenticated` | 401 | `unauthenticated` | |
+| `refused` | the outcome's `status`, else 400 | the outcome's `code`, else `refused` | `message` is the outcome's `detail`. |
+| `unavailable` | 503 | `discord_unavailable` | |
+
+Every `unavailable` gets that last row, including the two that do not come from
+Discord: a flow built without a store, and a store that answered `unavailable`.
+In both, the code and the sentence name Discord even though the site's own back
+end is what is missing or failed.
+
+`unlinkResponse(outcome)`, for the outcome of `flow.unlink`:
+
+| `outcome.state` | Status | `body.error` | Notes |
+|---|---|---|---|
+| `ok` | 200 | — | Body is `{provider: 'discord', unlinked}`. `unlinked: false` is still a 200. |
+| `unauthenticated` | 401 | `unauthenticated` | |
+| `refused` | the outcome's `status` | the outcome's `code` | `message` is forwarded as the store wrote it. |
+| `unavailable` | 503 | `link_unavailable` | |
+
 ## Bringing your own signer
 
 `state` signing is a port:
@@ -273,7 +306,7 @@ const flow = createDiscordLinkFlow({config, signer, store, fetchImpl: myStub});
 | `authorizeUrl` / `exchangeCodeForIdentity` | The raw two steps. |
 | `DISCORD_AUTHORIZE_URL` / `DISCORD_TOKEN_URL` / `DISCORD_IDENTITY_URL` / `DISCORD_SCOPE` / `DISCORD_TIMEOUT_MS` | The pinned endpoints, the one scope, and the per-call timeout. |
 | `DISCORD_USERNAME_MAX_LENGTH` | The length (64) the identity's `username` is truncated to. That field is Discord's `global_name` when set, otherwise the handle. |
-| `callbackResponse` / `unlinkResponse` | Framework-agnostic status/body decision tables. |
+| `callbackResponse` / `unlinkResponse` | Framework-agnostic status/body decision tables; see [What the routes answer](#what-the-routes-answer). |
 | `activeSessionFrom` | Picks the rotated token over the cookie token when a session was renewed mid-request. |
 | `linkOutcomeFrom` / `refusalFrom` | Status-to-outcome mapping for a store backed by your own HTTP API. |
 
