@@ -246,6 +246,32 @@ describe('mapping a store HTTP response to an outcome', () => {
         })).toEqual({state: 'unauthenticated'});
     });
 
+    it('checks the success statuses before 401 and 401 before the refusal statuses', () => {
+        // A status named in both lists is a success: the ok check runs first.
+        expect(linkOutcomeFrom({status: 409, body: {unlinked: false}}, {
+            read: () => ({unlinked: false}),
+            okStatuses: [200, 409],
+            refusalStatuses: [409]
+        })).toEqual({state: 'ok', value: {unlinked: false}});
+        // A store that names 401 a success gets a success, not a sign-in prompt.
+        expect(linkOutcomeFrom({status: 401, body: {}}, {
+            read: () => ({unlinked: true}),
+            okStatuses: [401]
+        })).toEqual({state: 'ok', value: {unlinked: true}});
+        // A success status with a body nobody recognises is still not read as a
+        // refusal, even when the same status is also named as one.
+        expect(linkOutcomeFrom({status: 409, body: {error: 'taken', message: 'Already linked.'}}, {
+            read: () => null,
+            okStatuses: [409],
+            refusalStatuses: [409]
+        })).toEqual({state: 'unavailable', detail: 'the account service answered with an unrecognised shape'});
+    });
+
+    it('names the configured upstream when a success body is not recognised', () => {
+        expect(linkOutcomeFrom({status: 200, body: 'surprise'}, {read: () => null, upstreamName: 'the accounts API'}))
+            .toEqual({state: 'unavailable', detail: 'the accounts API answered with an unrecognised shape'});
+    });
+
     it('keeps a falsy success value rather than reading it as an unrecognised shape', () => {
         // Only null means "not recognised"; false and 0 are answers.
         expect(linkOutcomeFrom({status: 200, body: {}}, {read: () => false}))
