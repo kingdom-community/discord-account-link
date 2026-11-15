@@ -5,9 +5,11 @@ import {
     DISCORD_IDENTITY_URL,
     DISCORD_TOKEN_URL,
     STATE_TTL_MS,
+    createHmacStateSigner,
     discordLinkConfigFromEnv,
     discordLinkFlowFromEnv,
     discordLinkingConfigured,
+    issueState,
     type AccountLinkStore,
     type EnvSource,
     type FetchLike,
@@ -109,6 +111,34 @@ describe('building a flow from the environment', () => {
         });
 
         expect(flow.configured()).toBe(true);
+    });
+
+    it('signs and checks with the injected signer even when the state secret is set', async () => {
+        // The test above proves the secret is not NEEDED; this one proves it is
+        // not USED. Were the secret allowed to win, the site's own signer would be
+        // silently bypassed, and a state signed with the environment's secret
+        // would be accepted by a flow that was told to trust a different key.
+        const {calls, fetchImpl} = stubFetch([]);
+        const flow = discordLinkFlowFromEnv({
+            env: FULL,
+            fetchImpl,
+            signer: {
+                sign: (payload) => `signed:${payload}`,
+                verify: (token) => token.startsWith('signed:')
+                    ? {ok: true, payload: token.slice('signed:'.length)}
+                    : {ok: false, reason: 'bad-signature'}
+            }
+        });
+        const begun = flow.begin('alice');
+        if (begun.state !== 'ok') {
+            throw new Error(`expected an authorize url, got ${begun.state}`);
+        }
+        const signedWithTheSecret = issueState('alice', createHmacStateSigner(FULL.DISCORD_STATE_SECRET)) as string;
+
+        expect(begun.oauthState.startsWith('signed:')).toBe(true);
+        expect(await flow.complete({accountUsername: 'alice', code: 'the-code', state: signedWithTheSecret}))
+            .toEqual({state: 'invalid-state', reason: 'bad-signature'});
+        expect(calls).toHaveLength(0);
     });
 
     it('names its options type on the public surface, so a wrapper can be typed', () => {
