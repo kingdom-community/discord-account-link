@@ -123,6 +123,37 @@ describe('verifying a state', () => {
             .toEqual({ok: false, reason: 'expired'});
     });
 
+    it('is already expired at exactly ten minutes, not a millisecond later', () => {
+        // The expiry is exclusive: the instant the TTL runs out the state is
+        // worthless, so "ten minutes" is a ceiling rather than a grace period.
+        const state = issueState('alice', signer, 1_000_000) as string;
+
+        expect(verifyState(state, 'alice', signer, 1_000_000 + STATE_TTL_MS))
+            .toEqual({ok: false, reason: 'expired'});
+    });
+
+    it('reports an expired state as expired before comparing the sessions', () => {
+        // The binding is only checked on a state that is still live, so an
+        // operator reading `wrong-session` in a log knows the state was current
+        // when it arrived, and an old one reads as a tab left open.
+        const state = issueState('mallory', signer, 1_000_000) as string;
+
+        expect(verifyState(state, 'alice', signer, 1_000_000 + STATE_TTL_MS + 1))
+            .toEqual({ok: false, reason: 'expired'});
+    });
+
+    it('calls an expiry that is not a number malformed, however far ahead it reads', () => {
+        // A signer shared with the rest of the site may have signed a payload
+        // whose `e` is a string. Comparing that against the clock would let
+        // JavaScript's coercion decide whether it is live.
+        const farFuture = String(Date.now() + STATE_TTL_MS);
+
+        expect(verifyState(signer.sign(JSON.stringify({n: 'nonce', u: 'alice', e: farFuture})), 'alice', signer))
+            .toEqual({ok: false, reason: 'malformed'});
+        expect(verifyState(signer.sign(JSON.stringify({n: 'nonce', u: 'alice', e: null})), 'alice', signer))
+            .toEqual({ok: false, reason: 'malformed'});
+    });
+
     it('rejects everything when there is no signer, rather than accepting anything', () => {
         const state = issueState('alice', signer) as string;
 
