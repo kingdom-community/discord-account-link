@@ -536,6 +536,26 @@ describe('reading the callback query', () => {
             .toEqual({state: 'ok', identity: {id: '112233445566778899', username: 'Alice'}});
         expect(calls).toHaveLength(2);
     });
+
+    it('does not look past an empty first value for a usable one further along', async () => {
+        // "The first value" means the first value, not the first non-empty one.
+        // A query a third party can append to is not one to go hunting through
+        // for something that works, so an empty first value is read as absence
+        // and whatever follows it is ignored.
+        const {flow, calls} = flowWith(SUCCESSFUL_EXCHANGE);
+
+        expect(await flow.complete({accountUsername: 'alice', code: ['', 'second-code'], state: validState()}))
+            .toEqual({state: 'refused', detail: 'Discord did not return an authorisation code'});
+        expect(await flow.complete({accountUsername: 'alice', code: 'c', state: ['', validState()]}))
+            .toEqual({state: 'invalid-state', reason: 'malformed'});
+        expect(calls).toHaveLength(0);
+
+        // The same rule for Discord's `error`: an empty first value is no
+        // cancellation, even with one behind it, and the flow carries on.
+        expect(await flow.complete({accountUsername: 'alice', code: 'c', state: validState(), error: ['', 'access_denied']}))
+            .toEqual({state: 'ok', identity: {id: '112233445566778899', username: 'Alice'}});
+        expect(calls).toHaveLength(2);
+    });
 });
 
 describe('recording and removing the link', () => {
